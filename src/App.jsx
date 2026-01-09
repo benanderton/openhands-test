@@ -15,57 +15,42 @@ function App() {
     
     // Using a public CORS proxy for demonstration purposes
     const fetchStories = async () => {
+      setLoading(true)
+      setError(null)
       try {
-        // We'll use a simple approach: fetch the HTML and parse it.
-        // Note: This is fragile and depends on BBC's structure.
-        // Using allorigins.win to bypass CORS
-        const response = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://www.bbc.com/news'))
+        // Fetching RSS feed via allorigins.win to bypass CORS
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+
+        const response = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('http://feeds.bbci.co.uk/news/rss.xml'), {
+          signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+
         if (!response.ok) throw new Error('Network response was not ok')
         const data = await response.json()
         
         const parser = new DOMParser()
-        const doc = parser.parseFromString(data.contents, 'text/html')
+        const doc = parser.parseFromString(data.contents, 'text/xml')
         
-        // Select stories. BBC structure changes, but let's try to find common article selectors
-        // This selector targets the main promo stories usually found on the news front page
-        // We look for card wrappers
-        const cardSelectors = [
-          '[data-testid="card-text-wrapper"]', 
-          '[data-testid="card-main-wrapper"]',
-          '.gs-c-promo-body' // Legacy selector just in case
-        ];
-        
-        let articles = [];
-        for (const selector of cardSelectors) {
-          const found = doc.querySelectorAll(selector);
-          if (found.length > 0) {
-            articles = Array.from(found);
-            break;
-          }
-        }
+        const items = Array.from(doc.querySelectorAll('item'))
 
-        const parsedArticles = articles
+        const parsedArticles = items
           .slice(0, 10)
-          .map(article => {
-            const headline = article.querySelector('h2, h3, .gs-c-promo-heading__title')?.innerText
-            const description = article.querySelector('p, .gs-c-promo-summary')?.innerText
-            // Find the closest anchor tag for the link
-            const linkElement = article.closest('div')?.querySelector('a') || article.querySelector('a');
-            let link = linkElement?.getAttribute('href')
+          .map(item => {
+            const headline = item.querySelector('title')?.textContent
+            const description = item.querySelector('description')?.textContent
+            const link = item.querySelector('link')?.textContent
             
-            if (link && !link.startsWith('http')) {
-              link = `https://www.bbc.com${link}`
-            }
-
             return { headline, description, link }
           })
-          .filter(story => story.headline && story.headline.trim().length > 0) // Filter out empty ones
+          .filter(story => story.headline && story.headline.trim().length > 0)
 
         setStories(parsedArticles)
-        setLoading(false)
       } catch (err) {
         console.error(err)
-        setError('Failed to fetch stories. CORS or parsing issue.')
+        setError('Failed to fetch stories: ' + err.message)
+      } finally {
         setLoading(false)
       }
     }
@@ -73,9 +58,14 @@ function App() {
     fetchStories()
   }, [])
 
+  const handleReload = () => {
+    window.location.reload()
+  }
+
   return (
     <div className="container">
       <h1>BBC News Top 10</h1>
+      <button onClick={handleReload} style={{marginBottom: '1rem'}}>Reload App</button>
       {loading && <p>Loading stories...</p>}
       {error && <p className="error">{error}</p>}
       <div className="stories">
